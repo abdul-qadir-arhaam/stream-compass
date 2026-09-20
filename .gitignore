@@ -63,6 +63,8 @@ dist/
 frontend/dist/
 dist-ssr/
 *.local
+.vercel/
+
 
 # IDE & Editor Settings
 .vscode/
