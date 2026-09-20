@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, Float, Boolean, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Text, Float, Boolean, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 from app.models.base import TimestampMixin
@@ -22,6 +22,8 @@ class UserTitle(Base, TimestampMixin):
 
     __table_args__ = (
         UniqueConstraint("user_id", "title_id", name="uq_user_title"),
+        Index("idx_user_titles_user_watched", "user_id", "watched"),
+        Index("idx_user_titles_user_rating", "user_id", "rating"),
     )
 
 

@@ -1,6 +1,6 @@
 from typing import List, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, desc, func
 
 from app.core.database import get_db
@@ -25,18 +25,44 @@ from app.schemas.friend import (
 router = APIRouter()
 
 
-def _get_user_taste_genres(user: User, db: Session, limit: int = 3) -> List[str]:
+def _get_genres_map(db: Session) -> Dict[int, str]:
+    """Cache-friendly genre lookup dictionary."""
+    return {g.id: g.name for g in db.query(Genre).all()}
+
+
+def _compute_taste_genres_from_interactions(
+    items: List[UserTitle],
+    genres_map: Dict[int, str],
+    limit: int = 3,
+) -> List[str]:
+    """Compute top taste genres in memory from loaded interactions without extra DB queries."""
+    genre_weights: Dict[int, float] = {}
+    for ur in items:
+        if not ur.title or ur.rating is None:
+            continue
+        diff = ur.rating - 3.0
+        mult = diff * 2.0 if diff > 0 else (diff * 1.5 if diff < 0 else 0.5)
+        for g in ur.title.genres:
+            genre_weights[g.id] = genre_weights.get(g.id, 0.0) + mult
+
+    top_gids = sorted(genre_weights.items(), key=lambda x: x[1], reverse=True)[:limit]
+    return [genres_map[gid] for gid, _ in top_gids if gid in genres_map]
+
+
+def _get_user_taste_genres(
+    user: User,
+    db: Session,
+    limit: int = 3,
+    genres_map: Optional[Dict[int, str]] = None,
+) -> List[str]:
     """Helper to extract top taste genres for a user."""
     weights = recommender.get_user_taste_weights(user, db)
     if not weights:
         return []
     top_gids = sorted(weights.items(), key=lambda x: x[1], reverse=True)[:limit]
-    top_names = []
-    for gid, _ in top_gids:
-        g = db.query(Genre).filter(Genre.id == gid).first()
-        if g:
-            top_names.append(g.name)
-    return top_names
+    if genres_map is None:
+        genres_map = _get_genres_map(db)
+    return [genres_map[gid] for gid, _ in top_gids if gid in genres_map]
 
 
 @router.get("/", response_model=List[FriendSummarySchema])
@@ -44,7 +70,7 @@ def list_friends(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Retrieve all friends connected with the current user."""
+    """Retrieve all friends connected with the current user via a fast batched join."""
     friendships = (
         db.query(Friendship)
         .filter(
@@ -56,27 +82,41 @@ def list_friends(
         )
         .all()
     )
+    friend_ids = list({
+        f.friend_id if f.user_id == current_user.id else f.user_id
+        for f in friendships
+    })
+    if not friend_ids:
+        return []
+
+    # Batch load friends and genre mapping
+    friends = db.query(User).filter(User.id.in_(friend_ids)).all()
+    friends_by_id = {u.id: u for u in friends}
+    genres_map = _get_genres_map(db)
+
+    # Batch load interactions with eager loaded titles and genres in ONE roundtrip
+    interactions = (
+        db.query(UserTitle)
+        .options(joinedload(UserTitle.title).joinedload(Title.genres))
+        .filter(UserTitle.user_id.in_(friend_ids))
+        .all()
+    )
+
+    user_interactions: Dict[int, List[UserTitle]] = {fid: [] for fid in friend_ids}
+    for item in interactions:
+        if item.user_id in user_interactions:
+            user_interactions[item.user_id].append(item)
+
     friends_list = []
-    seen_ids = set()
-    for f in friendships:
-        target_friend_id = f.friend_id if f.user_id == current_user.id else f.user_id
-        if target_friend_id in seen_ids:
-            continue
-        seen_ids.add(target_friend_id)
-        friend_user = db.query(User).filter(User.id == target_friend_id).first()
+    for fid in friend_ids:
+        friend_user = friends_by_id.get(fid)
         if not friend_user:
             continue
-
-        # Get metrics
-        interactions = (
-            db.query(UserTitle)
-            .filter(UserTitle.user_id == friend_user.id)
-            .all()
-        )
-        watched_count = sum(1 for i in interactions if i.watched)
-        rated = [i.rating for i in interactions if i.rating is not None]
+        items = user_interactions.get(fid, [])
+        watched_count = sum(1 for i in items if i.watched)
+        rated = [i.rating for i in items if i.rating is not None]
         avg_rating = round(sum(rated) / len(rated), 1) if rated else 0.0
-        taste_genres = _get_user_taste_genres(friend_user, db)
+        taste_genres = _compute_taste_genres_from_interactions(items, genres_map)
 
         friends_list.append(
             FriendSummarySchema(
@@ -96,16 +136,45 @@ def get_friend_requests(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List pending incoming and outgoing friend requests."""
-    # Incoming: requests sent to current_user
+    """List pending incoming and outgoing friend requests with batched loading."""
     incoming_records = (
         db.query(Friendship)
         .filter(Friendship.friend_id == current_user.id, Friendship.status == "pending")
         .all()
     )
+    outgoing_records = (
+        db.query(Friendship)
+        .filter(Friendship.user_id == current_user.id, Friendship.status == "pending")
+        .all()
+    )
+
+    all_uids = list({f.user_id for f in incoming_records}.union({f.friend_id for f in outgoing_records}))
+    if not all_uids:
+        return FriendRequestsListResponse(incoming=[], outgoing=[])
+
+    users_by_id = {u.id: u for u in db.query(User).filter(User.id.in_(all_uids)).all()}
+    genres_map = _get_genres_map(db)
+
+    # Batch load interactions
+    interactions = (
+        db.query(UserTitle)
+        .options(joinedload(UserTitle.title).joinedload(Title.genres))
+        .filter(UserTitle.user_id.in_(all_uids))
+        .all()
+    )
+    user_interactions: Dict[int, List[UserTitle]] = {uid: [] for uid in all_uids}
+    for item in interactions:
+        if item.user_id in user_interactions:
+            user_interactions[item.user_id].append(item)
+
+    user_taste_map = {
+        uid: _compute_taste_genres_from_interactions(user_interactions.get(uid, []), genres_map)
+        for uid in all_uids
+    }
+
     incoming_list = []
     for f in incoming_records:
-        sender = db.query(User).filter(User.id == f.user_id).first()
+        sender = users_by_id.get(f.user_id)
         if sender:
             incoming_list.append(
                 FriendRequestItem(
@@ -113,20 +182,14 @@ def get_friend_requests(
                     user_id=sender.id,
                     username=sender.username,
                     email=sender.email,
-                    taste_genres=_get_user_taste_genres(sender, db),
+                    taste_genres=user_taste_map.get(sender.id, []),
                     created_at=f.created_at.isoformat() if hasattr(f, "created_at") and f.created_at else None,
                 )
             )
 
-    # Outgoing: requests sent by current_user
-    outgoing_records = (
-        db.query(Friendship)
-        .filter(Friendship.user_id == current_user.id, Friendship.status == "pending")
-        .all()
-    )
     outgoing_list = []
     for f in outgoing_records:
-        recipient = db.query(User).filter(User.id == f.friend_id).first()
+        recipient = users_by_id.get(f.friend_id)
         if recipient:
             outgoing_list.append(
                 FriendRequestItem(
@@ -134,7 +197,7 @@ def get_friend_requests(
                     user_id=recipient.id,
                     username=recipient.username,
                     email=recipient.email,
-                    taste_genres=_get_user_taste_genres(recipient, db),
+                    taste_genres=user_taste_map.get(recipient.id, []),
                     created_at=f.created_at.isoformat() if hasattr(f, "created_at") and f.created_at else None,
                 )
             )
@@ -151,7 +214,7 @@ def search_users_to_add(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Search registered users to connect with as friends."""
+    """Search registered users to connect with as friends using batched taste retrieval."""
     term = f"%{q.strip()}%" if q else "%"
     users_query = (
         db.query(User)
@@ -169,6 +232,8 @@ def search_users_to_add(
             )
         )
     candidate_users = users_query.order_by(User.username.asc()).limit(30).all()
+    if not candidate_users:
+        return []
 
     # Get all friendships involving current_user
     user_friendships = (
@@ -177,13 +242,12 @@ def search_users_to_add(
             or_(
                 Friendship.user_id == current_user.id,
                 Friendship.friend_id == current_user.id,
-            )
+            ),
+            Friendship.status.in_(["accepted", "pending"]),
         )
         .all()
     )
 
-    # Map target user_id -> status
-    # status could be "accepted", "pending_sent" (user_id=current_user), "pending_received" (friend_id=current_user)
     relation_map: Dict[int, str] = {}
     for f in user_friendships:
         if f.status == "accepted":
@@ -195,10 +259,24 @@ def search_users_to_add(
             else:
                 relation_map[f.user_id] = "pending_received"
 
+    # Batch compute taste genres for candidates
+    c_ids = [u.id for u in candidate_users]
+    genres_map = _get_genres_map(db)
+    interactions = (
+        db.query(UserTitle)
+        .options(joinedload(UserTitle.title).joinedload(Title.genres))
+        .filter(UserTitle.user_id.in_(c_ids))
+        .all()
+    )
+    c_interactions: Dict[int, List[UserTitle]] = {uid: [] for uid in c_ids}
+    for item in interactions:
+        if item.user_id in c_interactions:
+            c_interactions[item.user_id].append(item)
+
     results = []
     for u in candidate_users:
         status_val = relation_map.get(u.id, "none")
-        taste_genres = _get_user_taste_genres(u, db)
+        taste_genres = _compute_taste_genres_from_interactions(c_interactions.get(u.id, []), genres_map)
         results.append(
             FriendUserSearchItem(
                 id=u.id,
@@ -438,9 +516,10 @@ def get_friend_taste_profile(
             detail="Friend not found",
         )
 
-    # Fetch friend's library entries
+    # Fetch friend's library entries with eager loaded titles and genres
     interactions = (
         db.query(UserTitle)
+        .options(joinedload(UserTitle.title).joinedload(Title.genres))
         .filter(UserTitle.user_id == friend_id)
         .order_by(desc(UserTitle.updated_at))
         .all()

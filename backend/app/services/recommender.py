@@ -1,5 +1,5 @@
 from typing import List, Dict, Any, Optional, Set
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, or_
 
 from app.models.user import User
@@ -98,6 +98,7 @@ class RecommendationService:
         """Calculate genre weight vectors from user's rated titles."""
         user_ratings = (
             db.query(UserTitle)
+            .options(joinedload(UserTitle.title).joinedload(Title.genres))
             .filter(UserTitle.user_id == user.id, UserTitle.rating.isnot(None))
             .all()
         )
@@ -138,6 +139,7 @@ class RecommendationService:
 
         user_ratings = (
             db.query(UserTitle)
+            .options(joinedload(UserTitle.title).joinedload(Title.genres))
             .filter(UserTitle.user_id == user.id, UserTitle.rating.isnot(None))
             .all()
         )
@@ -163,7 +165,7 @@ class RecommendationService:
 
         genre_weights = RecommendationService.get_user_taste_weights(user, db)
 
-        candidate_query = db.query(Title)
+        candidate_query = db.query(Title).options(joinedload(Title.genres))
         if watched_ids:
             candidate_query = candidate_query.filter(~Title.id.in_(watched_ids))
 
@@ -307,7 +309,7 @@ class RecommendationService:
         feedback = getattr(context, "feedback", None)
 
         # 3. Base candidate query
-        candidate_query = db.query(Title)
+        candidate_query = db.query(Title).options(joinedload(Title.genres))
         if excluded_ids:
             candidate_query = candidate_query.filter(~Title.id.in_(excluded_ids))
 
@@ -368,7 +370,7 @@ class RecommendationService:
         # Identify genres of rejected titles if user indicated 'wrong_genre'
         rejected_genres: Set[str] = set()
         if feedback == "wrong_genre" and rejected_ids:
-            rejected_titles = db.query(Title).filter(Title.id.in_(rejected_ids)).all()
+            rejected_titles = db.query(Title).options(joinedload(Title.genres)).filter(Title.id.in_(rejected_ids)).all()
             for rt in rejected_titles:
                 for g in rt.genres:
                     rejected_genres.add(g.name)
@@ -750,7 +752,7 @@ class RecommendationService:
         situation = getattr(context, "situation", "friends")
 
         # 3. Base candidate query
-        candidate_query = db.query(Title)
+        candidate_query = db.query(Title).options(joinedload(Title.genres))
         if excluded_ids:
             candidate_query = candidate_query.filter(~Title.id.in_(excluded_ids))
 

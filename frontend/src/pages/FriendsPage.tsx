@@ -83,6 +83,20 @@ export const FriendsPage: React.FC = () => {
     loadRequests();
   }, [loadFriends, loadRequests]);
 
+  // Sync when requests are accepted/declined elsewhere (e.g. from Navbar notification popover)
+  useEffect(() => {
+    const handleRemoteChange = () => {
+      loadFriends();
+      loadRequests();
+    };
+    window.addEventListener('friend_request_accepted', handleRemoteChange);
+    window.addEventListener('friend_request_declined', handleRemoteChange);
+    return () => {
+      window.removeEventListener('friend_request_accepted', handleRemoteChange);
+      window.removeEventListener('friend_request_declined', handleRemoteChange);
+    };
+  }, [loadFriends, loadRequests]);
+
   // Handle Search users
   useEffect(() => {
     if (!searchQuery.trim()) {
@@ -116,14 +130,14 @@ export const FriendsPage: React.FC = () => {
         setSearchResults((prev) =>
           prev.map((u) => (u.id === friendId ? { ...u, is_friend: true, relationship_status: 'friends' } : u))
         );
-        await loadFriends();
-        await refreshFriendsWatched();
+        await Promise.all([loadFriends(), refreshFriendsWatched(), loadRequests()]);
       } else {
         setSearchResults((prev) =>
           prev.map((u) => (u.id === friendId ? { ...u, relationship_status: 'pending_sent' } : u))
         );
+        await loadRequests();
       }
-      await loadRequests();
+      window.dispatchEvent(new CustomEvent('refresh_friend_requests'));
     } catch (err) {
       console.error('Failed to send friend request', err);
     } finally {
@@ -135,18 +149,25 @@ export const FriendsPage: React.FC = () => {
   const handleAcceptRequest = async (requestId: number, senderId?: number) => {
     const key = `accept-${requestId}`;
     setActionPendingMap((prev) => ({ ...prev, [key]: true }));
+
+    // Optimistic UI update
+    const acceptedReq = incomingRequests.find((r) => r.request_id === requestId);
+    setIncomingRequests((prev) => prev.filter((r) => r.request_id !== requestId));
+
     try {
       await api.acceptFriendRequest(requestId);
-      await loadRequests();
-      await loadFriends();
-      await refreshFriendsWatched();
       if (senderId) {
         setSearchResults((prev) =>
           prev.map((u) => (u.id === senderId ? { ...u, is_friend: true, relationship_status: 'friends' } : u))
         );
       }
+      await Promise.all([loadFriends(), loadRequests(), refreshFriendsWatched()]);
+      window.dispatchEvent(new CustomEvent('refresh_friend_requests'));
     } catch (err) {
       console.error('Failed to accept friend request', err);
+      if (acceptedReq) {
+        setIncomingRequests((prev) => [acceptedReq, ...prev]);
+      }
     } finally {
       setActionPendingMap((prev) => ({ ...prev, [key]: false }));
     }
@@ -156,16 +177,25 @@ export const FriendsPage: React.FC = () => {
   const handleDeclineRequest = async (requestId: number, senderId?: number) => {
     const key = `decline-${requestId}`;
     setActionPendingMap((prev) => ({ ...prev, [key]: true }));
+
+    // Optimistic UI update
+    const declinedReq = incomingRequests.find((r) => r.request_id === requestId);
+    setIncomingRequests((prev) => prev.filter((r) => r.request_id !== requestId));
+
     try {
       await api.declineFriendRequest(requestId);
-      await loadRequests();
       if (senderId) {
         setSearchResults((prev) =>
           prev.map((u) => (u.id === senderId ? { ...u, relationship_status: 'none' } : u))
         );
       }
+      await loadRequests();
+      window.dispatchEvent(new CustomEvent('refresh_friend_requests'));
     } catch (err) {
       console.error('Failed to decline friend request', err);
+      if (declinedReq) {
+        setIncomingRequests((prev) => [declinedReq, ...prev]);
+      }
     } finally {
       setActionPendingMap((prev) => ({ ...prev, [key]: false }));
     }

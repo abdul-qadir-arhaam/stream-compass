@@ -1,6 +1,6 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc
 
 from app.core.database import get_db
@@ -116,6 +116,7 @@ def get_watched_titles(
     """Retrieve all titles marked as watched by the current user."""
     items = (
         db.query(UserTitle)
+        .options(joinedload(UserTitle.title).joinedload(Title.genres))
         .filter(UserTitle.user_id == current_user.id, UserTitle.watched == True)
         .order_by(desc(UserTitle.updated_at))
         .all()
@@ -198,6 +199,7 @@ def get_watchlist(
     """Retrieve all titles on user's watchlist."""
     items = (
         db.query(Watchlist)
+        .options(joinedload(Watchlist.title).joinedload(Title.genres))
         .filter(Watchlist.user_id == current_user.id)
         .order_by(desc(Watchlist.created_at))
         .all()
@@ -248,6 +250,7 @@ def get_taste_profile(
     """Calculate taste profile metrics and favorite genres."""
     user_titles = (
         db.query(UserTitle)
+        .options(joinedload(UserTitle.title).joinedload(Title.genres))
         .filter(UserTitle.user_id == current_user.id)
         .all()
     )

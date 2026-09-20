@@ -1,10 +1,12 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.models.user import User
+from app.models.library import UserTitle
+from app.models.title import Title, Genre
 from app.schemas.decision import (
     DecisionContextRequest,
     DecisionResponse,
@@ -163,18 +165,36 @@ def get_available_group_users(
         key=lambda u: (0 if u.id in friend_ids else 1, u.username.lower())
     )
 
+    # 2. Batch load all user ratings and calculate taste vectors in memory
+    user_ids = [u.id for u in sorted_users]
+    genres_map = {g.id: g.name for g in db.query(Genre).all()}
+
+    interactions = (
+        db.query(UserTitle)
+        .options(joinedload(UserTitle.title).joinedload(Title.genres))
+        .filter(UserTitle.user_id.in_(user_ids), UserTitle.rating.isnot(None))
+        .all()
+    )
+    user_interactions = {uid: [] for uid in user_ids}
+    for item in interactions:
+        if item.user_id in user_interactions:
+            user_interactions[item.user_id].append(item)
+
     result = []
     for u in sorted_users:
-        # Get up to 3 top genres
-        taste_weights = recommender.get_user_taste_weights(u, db)
-        top_genres = []
-        if taste_weights:
-            from app.models.title import Genre
-            top_gids = sorted(taste_weights.items(), key=lambda x: x[1], reverse=True)[:3]
-            for gid, _ in top_gids:
-                g_obj = db.query(Genre).filter(Genre.id == gid).first()
-                if g_obj:
-                    top_genres.append(g_obj.name)
+        items = user_interactions.get(u.id, [])
+        genre_weights = {}
+        for ur in items:
+            if not ur.title or ur.rating is None:
+                continue
+            diff = ur.rating - 3.0
+            mult = diff * 2.0 if diff > 0 else (diff * 1.5 if diff < 0 else 0.5)
+            for g in ur.title.genres:
+                genre_weights[g.id] = genre_weights.get(g.id, 0.0) + mult
+
+        top_gids = sorted(genre_weights.items(), key=lambda x: x[1], reverse=True)[:3]
+        top_genres = [genres_map[gid] for gid, _ in top_gids if gid in genres_map]
+
         result.append(
             GroupMemberSummary(
                 id=u.id,

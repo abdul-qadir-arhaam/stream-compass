@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 from app.models.base import TimestampMixin
@@ -18,4 +18,6 @@ class Friendship(Base, TimestampMixin):
 
     __table_args__ = (
         UniqueConstraint("user_id", "friend_id", name="uq_user_friend"),
+        Index("idx_friendships_user_status", "user_id", "status"),
+        Index("idx_friendships_friend_status", "friend_id", "status"),
     )

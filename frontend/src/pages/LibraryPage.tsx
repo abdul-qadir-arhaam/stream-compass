@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import type { UserTitle } from '../types';
 import { api } from '../services/api';
 import { TitleDetailModal } from '../components/TitleDetailModal';
+import { FriendWatchedBadge } from '../components/FriendWatchedBadge';
 
 import { useAuth } from '../context/AuthContext';
 
@@ -279,6 +280,11 @@ export const LibraryPage: React.FC = () => {
                       "{item.rating_reason}"
                     </div>
                   )}
+
+                  {/* Friend watched badge */}
+                  <div>
+                    <FriendWatchedBadge titleId={item.title_id} compact />
+                  </div>
                 </div>
               </div>
             </div>

@@ -17,27 +17,52 @@ export const FriendsWatchedProvider: React.FC<{ children: React.ReactNode }> = (
   const [friendsWatchedMap, setFriendsWatchedMap] = useState<Record<number, FriendWatchStatusItem[]>>({});
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
-  const refreshFriendsWatched = useCallback(async () => {
+  const refreshFriendsWatched = useCallback(async (isSilent = false) => {
     if (!user) {
       setFriendsWatchedMap({});
       return;
     }
-    setIsLoading(true);
+    if (!isSilent) {
+      setIsLoading(true);
+    }
     try {
       const summary = await api.getFriendsWatchedSummary();
-      setFriendsWatchedMap(summary || {});
+      if (summary) {
+        setFriendsWatchedMap(summary);
+      }
     } catch (err) {
       console.error('Failed to load friends watched summary', err);
-      setFriendsWatchedMap({});
     } finally {
-      setIsLoading(false);
+      if (!isSilent) {
+        setIsLoading(false);
+      }
     }
   }, [user?.id]);
 
   useEffect(() => {
-    setFriendsWatchedMap({});
     refreshFriendsWatched();
   }, [refreshFriendsWatched]);
+
+  // Periodic background sync and on-window-focus sync
+  useEffect(() => {
+    if (!user) return;
+
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        refreshFriendsWatched(true);
+      }
+    }, 20000);
+
+    const handleFocus = () => {
+      refreshFriendsWatched(true);
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [user, refreshFriendsWatched]);
 
   const getFriendsForTitle = useCallback(
     (titleId: number): FriendWatchStatusItem[] => {
