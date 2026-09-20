@@ -22,10 +22,13 @@ def get_user_by_username(db: Session, username: str) -> Optional[User]:
 
 
 def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
-    user = get_user_by_email(db, email)
+    clean_identifier = email.strip()
+    user = get_user_by_email(db, clean_identifier)
+    if not user:
+        user = get_user_by_username(db, clean_identifier)
     if not user:
         return None
-    if not verify_password(password, user.hashed_password):
+    if not verify_password(password.strip(), user.hashed_password):
         return None
     return user
 

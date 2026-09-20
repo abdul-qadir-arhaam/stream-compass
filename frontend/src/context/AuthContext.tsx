@@ -28,11 +28,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const currentUser = await api.getMe();
         setUser(currentUser);
-      } catch (err) {
-        console.error('Session expired or invalid:', err);
-        localStorage.removeItem('stream_compass_token');
-        setToken(null);
-        setUser(null);
+      } catch (err: any) {
+        console.error('Session verification status:', err);
+        // Only wipe credentials if the server explicitly confirmed unauthorized (401)
+        if (err?.status === 401) {
+          localStorage.removeItem('stream_compass_token');
+          setToken(null);
+          setUser(null);
+        }
       } finally {
         setIsLoading(false);
       }
@@ -42,14 +45,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const login = async (email: string, password: string) => {
-    const res: AuthResponse = await api.login({ email, password });
+    const res: AuthResponse = await api.login({ email: email.trim(), password: password.trim() });
     localStorage.setItem('stream_compass_token', res.access_token);
     setToken(res.access_token);
     setUser(res.user);
   };
 
   const signup = async (email: string, username: string, password: string) => {
-    const res: AuthResponse = await api.signup({ email, username, password });
+    const res: AuthResponse = await api.signup({
+      email: email.trim().toLowerCase(),
+      username: username.trim(),
+      password: password.trim(),
+    });
     localStorage.setItem('stream_compass_token', res.access_token);
     setToken(res.access_token);
     setUser(res.user);

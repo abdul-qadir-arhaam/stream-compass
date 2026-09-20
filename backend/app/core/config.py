@@ -14,8 +14,8 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
     
-    # Database: Defaults to local SQLite in backend directory, or PostgreSQL via DATABASE_URL
-    DATABASE_URL: str = "sqlite:///./compass.db"
+    # Database: Defaults to Supabase PostgreSQL pooler, or PostgreSQL via DATABASE_URL
+    DATABASE_URL: str = "postgresql://postgres.edfbtydkmnoffzutiahx:abdulqadir8105221036@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres"
     
     # TMDB Integration
     TMDB_API_KEY: str = ""
