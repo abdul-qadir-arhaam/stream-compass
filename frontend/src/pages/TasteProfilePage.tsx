@@ -5,18 +5,27 @@ import type { TasteProfile } from '../types';
 import { api } from '../services/api';
 import { TitleDetailModal } from '../components/TitleDetailModal';
 
+import { useAuth } from '../context/AuthContext';
+
 export const TasteProfilePage: React.FC = () => {
+  const { user } = useAuth();
   const [profile, setProfile] = useState<TasteProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTitleId, setSelectedTitleId] = useState<number | null>(null);
 
   const fetchProfile = async () => {
+    if (!user) {
+      setProfile(null);
+      setIsLoading(false);
+      return;
+    }
     try {
       setIsLoading(true);
       const data = await api.getTasteProfile();
       setProfile(data);
     } catch (err) {
       console.error('Failed to load taste profile', err);
+      setProfile(null);
     } finally {
       setIsLoading(false);
     }
@@ -24,7 +33,7 @@ export const TasteProfilePage: React.FC = () => {
 
   useEffect(() => {
     fetchProfile();
-  }, []);
+  }, [user?.id]);
 
   const totalGenrePoints =
     profile?.favorite_genres.reduce((acc, curr) => acc + curr.count, 0) || 1;

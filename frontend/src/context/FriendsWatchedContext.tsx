@@ -25,15 +25,17 @@ export const FriendsWatchedProvider: React.FC<{ children: React.ReactNode }> = (
     setIsLoading(true);
     try {
       const summary = await api.getFriendsWatchedSummary();
-      setFriendsWatchedMap(summary);
+      setFriendsWatchedMap(summary || {});
     } catch (err) {
       console.error('Failed to load friends watched summary', err);
+      setFriendsWatchedMap({});
     } finally {
       setIsLoading(false);
     }
-  }, [user]);
+  }, [user?.id]);
 
   useEffect(() => {
+    setFriendsWatchedMap({});
     refreshFriendsWatched();
   }, [refreshFriendsWatched]);
 

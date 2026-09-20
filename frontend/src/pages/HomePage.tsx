@@ -16,7 +16,19 @@ export const HomePage: React.FC = () => {
   const [isRecsLoading, setIsRecsLoading] = useState(true);
   const [selectedTitleId, setSelectedTitleId] = useState<number | null>(null);
 
+  // Clear all interaction state when switching accounts
+  useEffect(() => {
+    setRatings({});
+    setWatchlist({});
+    setRecommendations([]);
+  }, [user?.id]);
+
   const loadUserData = useCallback(async () => {
+    if (!user) {
+      setRatings({});
+      setWatchlist({});
+      return;
+    }
     try {
       const [watchedData, watchlistData] = await Promise.all([
         api.getWatched(),
@@ -38,20 +50,27 @@ export const HomePage: React.FC = () => {
       setWatchlist(wlMap);
     } catch (err) {
       console.error('Failed to load user interaction data', err);
+      setRatings({});
+      setWatchlist({});
     }
-  }, []);
+  }, [user?.id]);
 
   const loadRecommendations = useCallback(async () => {
+    if (!user) {
+      setRecommendations([]);
+      return;
+    }
     try {
       setIsRecsLoading(true);
       const recs = await api.getRecommendations(8);
       setRecommendations(recs);
     } catch (err) {
       console.error('Failed to load recommendations', err);
+      setRecommendations([]);
     } finally {
       setIsRecsLoading(false);
     }
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     const init = async () => {
@@ -70,7 +89,7 @@ export const HomePage: React.FC = () => {
     };
 
     init();
-  }, [loadUserData, loadRecommendations]);
+  }, [user?.id, loadUserData, loadRecommendations]);
 
   const handleRate = async (titleId: number, score: number) => {
     const currentScore = ratings[titleId] || 0;

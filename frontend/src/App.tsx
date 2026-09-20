@@ -17,11 +17,14 @@ import { GroupPage } from './pages/GroupPage';
 import { FriendsPage } from './pages/FriendsPage';
 import { MobileBottomNav } from './components/MobileBottomNav';
 
+import { useAuth } from './context/AuthContext';
+
 function AnimatedRoutes() {
+  const { user } = useAuth();
   const location = useLocation();
 
   return (
-    <div key={location.pathname} className="animate-page-enter flex-1 flex flex-col">
+    <div key={`${user ? `auth-${user.id}` : 'guest'}-${location.pathname}`} className="animate-page-enter flex-1 flex flex-col">
       <Routes location={location}>
         <Route path="/" element={<LandingPage />} />
         <Route path="/search" element={<SearchPage />} />

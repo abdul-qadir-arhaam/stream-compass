@@ -5,7 +5,10 @@ import type { UserTitle } from '../types';
 import { api } from '../services/api';
 import { TitleDetailModal } from '../components/TitleDetailModal';
 
+import { useAuth } from '../context/AuthContext';
+
 export const LibraryPage: React.FC = () => {
+  const { user } = useAuth();
   const [items, setItems] = useState<UserTitle[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTitleId, setSelectedTitleId] = useState<number | null>(null);
@@ -13,12 +16,18 @@ export const LibraryPage: React.FC = () => {
   const [ratingFilter, setRatingFilter] = useState<string>('all');
 
   const fetchLibrary = async () => {
+    if (!user) {
+      setItems([]);
+      setIsLoading(false);
+      return;
+    }
     try {
       setIsLoading(true);
       const data = await api.getWatched();
       setItems(data);
     } catch (err) {
       console.error('Failed to load watched library', err);
+      setItems([]);
     } finally {
       setIsLoading(false);
     }
@@ -26,7 +35,7 @@ export const LibraryPage: React.FC = () => {
 
   useEffect(() => {
     fetchLibrary();
-  }, []);
+  }, [user?.id]);
 
   const handleRemove = async (titleId: number, e: React.MouseEvent) => {
     e.stopPropagation();

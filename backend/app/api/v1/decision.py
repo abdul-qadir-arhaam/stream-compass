@@ -117,6 +117,9 @@ def submit_decision_feedback_and_rerank(
     )
 
 
+from sqlalchemy import or_
+from app.models.friendship import Friendship
+
 @router.get("/users", response_model=list[GroupMemberSummary])
 def get_available_group_users(
     db: Session = Depends(get_db),
@@ -124,19 +127,31 @@ def get_available_group_users(
 ):
     """
     Fetch other users in the system to invite to Group Mode, prioritizing connected friends.
+    Strictly excludes synthetic peer bot accounts.
     """
-    from app.models.friendship import Friendship
-
-    friend_ids = {
-        f.friend_id
-        for f in db.query(Friendship.friend_id)
-        .filter(Friendship.user_id == current_user.id)
+    friendships = (
+        db.query(Friendship)
+        .filter(
+            or_(
+                Friendship.user_id == current_user.id,
+                Friendship.friend_id == current_user.id,
+            ),
+            Friendship.status == "accepted",
+        )
         .all()
+    )
+    friend_ids = {
+        f.friend_id if f.user_id == current_user.id else f.user_id
+        for f in friendships
     }
 
     other_users = (
         db.query(User)
-        .filter(User.id != current_user.id)
+        .filter(
+            User.id != current_user.id,
+            ~User.username.like("cinephile_peer_%"),
+            ~User.email.like("%@compass.internal"),
+        )
         .order_by(User.username.asc())
         .limit(50)
         .all()

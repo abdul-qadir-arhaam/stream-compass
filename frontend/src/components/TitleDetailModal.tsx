@@ -64,6 +64,12 @@ export const TitleDetailModal = ({
 
 
   useEffect(() => {
+    // Immediately reset interaction states so previous movie's or account's status doesn't linger
+    setIsWatched(false);
+    setUserRating(0);
+    setSelectedReason('');
+    setInWatchlist(false);
+
     if (!titleId) {
       setDetail(null);
       return;

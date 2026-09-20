@@ -78,20 +78,13 @@ export const GroupPage: React.FC = () => {
       .then((users) => {
         if (isMounted) {
           setAvailableUsers(users);
-          // Preselect friend from URL query param if provided (e.g. from Friends page)
+          // Preselect friend only from URL query param if explicitly provided (e.g. from Friends page)
           const paramFriendId = searchParams.get('friend_id');
           if (paramFriendId) {
             const targetId = parseInt(paramFriendId, 10);
             if (!isNaN(targetId)) {
               setSelectedUserIds([targetId]);
-              setIsLoadingUsers(false);
-              return;
             }
-          }
-
-          // Otherwise preselect the first friend or user if available
-          if (users.length > 0 && selectedUserIds.length === 0) {
-            setSelectedUserIds([users[0].id]);
           }
           setIsLoadingUsers(false);
         }

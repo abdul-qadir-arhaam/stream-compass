@@ -47,12 +47,23 @@ def list_friends(
     """Retrieve all friends connected with the current user."""
     friendships = (
         db.query(Friendship)
-        .filter(Friendship.user_id == current_user.id, Friendship.status == "accepted")
+        .filter(
+            or_(
+                Friendship.user_id == current_user.id,
+                Friendship.friend_id == current_user.id,
+            ),
+            Friendship.status == "accepted",
+        )
         .all()
     )
     friends_list = []
+    seen_ids = set()
     for f in friendships:
-        friend_user = db.query(User).filter(User.id == f.friend_id).first()
+        target_friend_id = f.friend_id if f.user_id == current_user.id else f.user_id
+        if target_friend_id in seen_ids:
+            continue
+        seen_ids.add(target_friend_id)
+        friend_user = db.query(User).filter(User.id == target_friend_id).first()
         if not friend_user:
             continue
 
@@ -144,7 +155,11 @@ def search_users_to_add(
     term = f"%{q.strip()}%" if q else "%"
     users_query = (
         db.query(User)
-        .filter(User.id != current_user.id)
+        .filter(
+            User.id != current_user.id,
+            ~User.username.like("cinephile_peer_%"),
+            ~User.email.like("%@compass.internal"),
+        )
     )
     if q and q.strip():
         users_query = users_query.filter(
@@ -508,12 +523,21 @@ def get_friends_watched_summary(
     Returns an aggregated mapping of title_id -> list of friends who have watched/rated that title.
     Powers the 'Watched by [Friend]' badges on every movie/series plate with zero performance lag.
     """
-    friend_ids = [
-        f.friend_id
-        for f in db.query(Friendship.friend_id)
-        .filter(Friendship.user_id == current_user.id, Friendship.status == "accepted")
+    friendships = (
+        db.query(Friendship)
+        .filter(
+            or_(
+                Friendship.user_id == current_user.id,
+                Friendship.friend_id == current_user.id,
+            ),
+            Friendship.status == "accepted",
+        )
         .all()
-    ]
+    )
+    friend_ids = list({
+        f.friend_id if f.user_id == current_user.id else f.user_id
+        for f in friendships
+    })
     if not friend_ids:
         return FriendsWatchedSummaryResponse(summary={})
 

@@ -5,18 +5,27 @@ import type { WatchlistItem } from '../types';
 import { api } from '../services/api';
 import { TitleDetailModal } from '../components/TitleDetailModal';
 
+import { useAuth } from '../context/AuthContext';
+
 export const WatchlistPage: React.FC = () => {
+  const { user } = useAuth();
   const [items, setItems] = useState<WatchlistItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTitleId, setSelectedTitleId] = useState<number | null>(null);
 
   const fetchWatchlist = async () => {
+    if (!user) {
+      setItems([]);
+      setIsLoading(false);
+      return;
+    }
     try {
       setIsLoading(true);
       const data = await api.getWatchlist();
       setItems(data);
     } catch (err) {
       console.error('Failed to load watchlist', err);
+      setItems([]);
     } finally {
       setIsLoading(false);
     }
@@ -24,7 +33,7 @@ export const WatchlistPage: React.FC = () => {
 
   useEffect(() => {
     fetchWatchlist();
-  }, []);
+  }, [user?.id]);
 
   const handleRemove = async (titleId: number, e: React.MouseEvent) => {
     e.stopPropagation();
